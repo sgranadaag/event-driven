@@ -1,0 +1,62 @@
+# The whole stack: RabbitMQ, the producer and two consumers, each project
+# built from its own Dockerfile. Each service can also be started on its own,
+# e.g. `docker compose up -d rabbitmq` and then the apps with `npm run start:dev`.
+#
+# Both consumers run the same image. What makes them two subscribers instead
+# of two workers is the queue: each one declares its own, so each gets its own
+# copy of every event. Give them the same RABBIT_QUEUE and they compete for
+# the events instead.
+
+name: event-driven
+
+services:
+  rabbitmq:
+    image: rabbitmq:4-management
+    # RabbitMQ names its data after the node, and the node after the host, so
+    # a fixed hostname keeps the same queues and messages across restarts.
+    hostname: rabbitmq
+    ports:
+      - "5672:5672"   # AMQP, the port every .env expects
+      - "15672:15672" # management UI: http://localhost:15672 (guest / guest)
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  producer:
+    build: ./producer
+    environment:
+      PORT: 3000
+      RABBIT_URL: amqp://guest:guest@rabbitmq:5672
+      RABBIT_EXCHANGE: orders
+    ports:
+      - "3000:3000"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  consumer-1:
+    build: ./consumer
+    environment:
+      RABBIT_URL: amqp://guest:guest@rabbitmq:5672
+      RABBIT_EXCHANGE: orders
+      RABBIT_QUEUE: consumer-1
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  consumer-2:
+    build: ./consumer
+    environment:
+      RABBIT_URL: amqp://guest:guest@rabbitmq:5672
+      RABBIT_EXCHANGE: orders
+      RABBIT_QUEUE: consumer-2
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+volumes:
+  rabbitmq-data:

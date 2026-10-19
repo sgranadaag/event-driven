@@ -1,0 +1,5 @@
+export const ENV = {
+  RABBIT_URL: 'RABBIT_URL',
+  RABBIT_EXCHANGE: 'RABBIT_EXCHANGE',
+  RABBIT_QUEUE: 'RABBIT_QUEUE',
+} as const;

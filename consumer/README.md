@@ -1,34 +1,36 @@
 # consumer
 
-The **consumer** (NestJS, no HTTP server). It reads `order.created` events from its own RabbitMQ queue and reacts to each one. It has no port, so you can run as many instances as you want. See the root [README](../README.md) for the whole flow.
+The **consumer** (NestJS, no HTTP server). It declares the 4 exchanges, the 5 queues and their bindings, then handles every message that reaches them. It has no port, so you can run as many instances as you want: they all read the same queues and share their messages. See the root [README](../README.md) for the whole exercise.
 
 ## Structure
 
 ```
 src/
-  main.ts           bootstrap: an application context, no HTTP server
-  app.module.ts     configuration and the module list
-  config/           functions that build a library's options: RabbitMQ
-  constants/        app-wide fixed values: the ENV keys
-  core/             Nest modules that are not domain: infrastructure
-    rabbit/         declares the queue, binds it, dispatches each message and acks it
-  interfaces/       interfaces shared across folders
-  modules/          the domain
-    order/          what to do when an order is created
-      order.consumer.ts   the entry point: subscribes the handlers, like a controller
-      order.service.ts    the reaction itself
-  utils/            pure helpers, one file per kind: date
+  main.ts            bootstrap: an application context, no HTTP server
+  app.module.ts      configuration and the module list
+  config/            functions that build a library's options: RabbitMQ
+  constants/         app-wide fixed values: the ENV keys
+  core/              Nest modules that are not domain: infrastructure
+    rabbit/
+      rabbit.schema.ts      the topology: 4 exchanges, 5 queues and every binding
+      rabbit.subscriber.ts  declares the schema, consumes every queue, dispatches by type and acks
+  interfaces/        interfaces shared across folders
+  modules/           the domain, one entry point (*.consumer.ts) and one service each
+    order/           order.create and order.classified
+    notification/    notification
+    announcement/    announcement, one copy per queue
+  utils/             pure helpers, one file per kind: date
 ```
 
-`core/rabbit/` knows RabbitMQ and nothing about orders. `modules/order/` registers one handler per event type with `RabbitSubscriber.subscribe(eventType, handler)`. It never sees a channel, a message or an ack.
+`core/rabbit/` knows RabbitMQ and nothing about orders. Each module's `*.consumer.ts` registers one handler per message type with `RabbitSubscriber.subscribe(type, handler)`, much like a controller. It never sees a channel or an ack. `rabbit.subscriber.ts` logs every message with the queue it came from and the exchange that routed it.
 
 ## Configuration
 
 | Variable | What it is |
 | --- | --- |
 | `RABBIT_URL` | Where RabbitMQ is |
-| `RABBIT_EXCHANGE` | The exchange the producer publishes to (`orders`) |
-| `RABBIT_QUEUE` | This instance's queue. A different queue gets its own copy of every event, and a shared queue splits the events between the instances reading it |
+
+The queues are fixed in `rabbit.schema.ts`, not configured: every instance declares the same ones and competes for their messages.
 
 ## Run it
 
@@ -38,10 +40,4 @@ npm install
 npm run start:dev
 ```
 
-To run another instance, override the queue:
-
-```bash
-RABBIT_QUEUE=consumer-2 npm run start:dev
-```
-
-It needs RabbitMQ at `RABBIT_URL`. Running `docker compose up -d rabbitmq` from the repository root starts it.
+To add an instance, run the same command in another terminal. It needs RabbitMQ at `RABBIT_URL`. Running `docker compose up -d rabbitmq` from the repository root starts it.

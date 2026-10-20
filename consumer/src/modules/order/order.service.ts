@@ -1,16 +1,18 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { ConsumedEvent } from '@interfaces/consumedEvent.interface';
+import type { ConsumedMessage } from '@interfaces/rabbit.interface';
 import type { Order } from './interfaces/order.interface';
 
 @Injectable()
 export class OrderService {
   private readonly logger = new Logger(OrderService.name);
 
-  handleCreated({ id, redelivered, payload: order }: ConsumedEvent<Order>): void {
-    const redeliveredLabel = redelivered ? ', redelivered' : '';
+  create({ payload: order }: ConsumedMessage<Order>): void {
+    this.logger.log(`Creating order ${order.id}: ${order.quantity} x ${order.product}`);
+  }
 
+  handleClassified({ queue, headers, payload: order }: ConsumedMessage<Order>): void {
     this.logger.log(
-      `Order ${order.id}: ${order.quantity} x ${order.product} (event ${id}${redeliveredLabel})`,
+      `Order ${order.id} matched "${queue}" with headers ${JSON.stringify(headers)}`,
     );
   }
 }

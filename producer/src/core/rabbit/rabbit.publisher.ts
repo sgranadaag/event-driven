@@ -6,51 +6,83 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { connect } from 'amqplib';
-import type { ChannelModel, ConfirmChannel } from 'amqplib';
+import type { ChannelModel, ConfirmChannel, Options } from 'amqplib';
 import { rabbitConfig } from '@config/rabbit.config';
+import type {
+  PublishMessageInput,
+  PublishMessageResult,
+} from '@interfaces/rabbit.interface';
 import { generateId } from '@utils/crypto.util';
 import { toUnixSeconds } from '@utils/date.util';
-import { EXCHANGE_TYPE, JSON_CONTENT_TYPE } from './rabbit.constants';
+import { JSON_CONTENT_TYPE } from './rabbit.constants';
+import { RABBIT_SCHEMA } from './rabbit.schema';
 
 @Injectable()
 export class RabbitPublisher implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RabbitPublisher.name);
+  private readonly returnedMessageIds = new Set<string>();
 
   private connection: ChannelModel;
   private channel: ConfirmChannel;
-  private exchange: string;
 
   constructor(private readonly configService: ConfigService) {}
 
   async onModuleInit(): Promise<void> {
-    const { url, exchange } = rabbitConfig(this.configService);
+    const { url } = rabbitConfig(this.configService);
 
-    this.exchange = exchange;
     this.connection = await connect(url);
     this.channel = await this.connection.createConfirmChannel();
+    this.channel.on('return', (message) =>
+      this.returnedMessageIds.add(message.properties.messageId),
+    );
 
-    await this.channel.assertExchange(exchange, EXCHANGE_TYPE, { durable: true });
+    for (const exchange of Object.values(RABBIT_SCHEMA.exchanges)) {
+      await this.channel.assertExchange(exchange.name, exchange.type, {
+        durable: true,
+      });
+    }
 
-    this.logger.log(`Publishing to exchange "${exchange}"`);
+    const exchangeNames = Object.values(RABBIT_SCHEMA.exchanges).map(
+      (exchange) => exchange.name,
+    );
+    this.logger.log(`Exchanges declared: ${exchangeNames.join(', ')}`);
   }
 
-  async publish(eventType: string, payload: object): Promise<string> {
-    const eventId = generateId();
-    const occurredAtSeconds = toUnixSeconds(new Date());
+  async publish({
+    exchange,
+    routingKey,
+    type,
+    payload,
+    headers,
+  }: PublishMessageInput): Promise<PublishMessageResult> {
+    const messageId = generateId();
     const content = Buffer.from(JSON.stringify(payload));
-
-    this.channel.publish(this.exchange, eventType, content, {
-      messageId: eventId,
-      type: eventType,
-      timestamp: occurredAtSeconds,
+    const options: Options.Publish = {
+      messageId,
+      type,
+      headers,
+      timestamp: toUnixSeconds(new Date()),
       contentType: JSON_CONTENT_TYPE,
       persistent: true,
+      mandatory: true,
+    };
+
+    await new Promise<void>((resolve, reject) => {
+      this.channel.publish(exchange, routingKey, content, options, (error) =>
+        error ? reject(error) : resolve(),
+      );
     });
-    await this.channel.waitForConfirms();
 
-    this.logger.log(`Published ${eventType} (event ${eventId})`);
+    const wasReturned = this.returnedMessageIds.delete(messageId);
+    const description = `${type} to "${exchange}" (routing key "${routingKey}", message ${messageId})`;
 
-    return eventId;
+    if (wasReturned) {
+      this.logger.warn(`Not routed to any queue, lost: ${description}`);
+    } else {
+      this.logger.log(`Published ${description}`);
+    }
+
+    return { messageId, routed: !wasReturned };
   }
 
   async onModuleDestroy(): Promise<void> {

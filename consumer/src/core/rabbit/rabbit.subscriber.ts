@@ -7,77 +7,107 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { connect } from 'amqplib';
 import type { Channel, ChannelModel, ConsumeMessage } from 'amqplib';
-import type {
-  ConsumedEvent,
-  EventHandler,
-} from '@interfaces/consumedEvent.interface';
 import { rabbitConfig } from '@config/rabbit.config';
+import type {
+  ConsumedMessage,
+  MessageHandler,
+} from '@interfaces/rabbit.interface';
 import { fromUnixSeconds } from '@utils/date.util';
-import { EXCHANGE_TYPE, PREFETCH_COUNT } from './rabbit.constants';
+import { PREFETCH_COUNT } from './rabbit.constants';
+import { RABBIT_SCHEMA } from './rabbit.schema';
 
 @Injectable()
 export class RabbitSubscriber implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(RabbitSubscriber.name);
-  private readonly handlers = new Map<string, EventHandler>();
+  private readonly handlers = new Map<string, MessageHandler>();
 
   private connection: ChannelModel;
 
   constructor(private readonly configService: ConfigService) {}
 
-  subscribe<Payload>(eventType: string, handler: EventHandler<Payload>): void {
-    this.handlers.set(eventType, handler as EventHandler);
+  subscribe<Payload>(messageType: string, handler: MessageHandler<Payload>): void {
+    this.handlers.set(messageType, handler as MessageHandler);
   }
 
   async onApplicationBootstrap(): Promise<void> {
-    const { url, exchange, queue } = rabbitConfig(this.configService);
-    const eventTypes = [...this.handlers.keys()];
+    const { url } = rabbitConfig(this.configService);
 
     this.connection = await connect(url);
     const channel = await this.connection.createChannel();
 
-    await channel.assertExchange(exchange, EXCHANGE_TYPE, { durable: true });
-    await channel.assertQueue(queue, { durable: true });
-    for (const eventType of eventTypes) {
-      await channel.bindQueue(queue, exchange, eventType);
+    for (const exchange of Object.values(RABBIT_SCHEMA.exchanges)) {
+      await channel.assertExchange(exchange.name, exchange.type, { durable: true });
     }
+
+    for (const queue of RABBIT_SCHEMA.queues) {
+      await channel.assertQueue(queue.name, { durable: true });
+
+      for (const binding of queue.bindings) {
+        await channel.bindQueue(
+          queue.name,
+          binding.exchange,
+          binding.routingKey,
+          binding.arguments,
+        );
+      }
+    }
+
     await channel.prefetch(PREFETCH_COUNT);
 
-    await channel.consume(queue, (message) => void this.dispatch(channel, message));
+    for (const queue of RABBIT_SCHEMA.queues) {
+      await channel.consume(queue.name, (message) =>
+        void this.dispatch(channel, queue.name, message),
+      );
+    }
 
-    this.logger.log(
-      `Consuming queue "${queue}" from exchange "${exchange}": ${eventTypes.join(', ')}`,
-    );
+    const queueNames = RABBIT_SCHEMA.queues.map((queue) => queue.name);
+    this.logger.log(`Consuming queues: ${queueNames.join(', ')}`);
   }
 
   private async dispatch(
     channel: Channel,
+    queue: string,
     message: ConsumeMessage | null,
   ): Promise<void> {
     if (!message) return;
 
-    const handler = this.handlers.get(message.fields.routingKey);
+    const { exchange, routingKey, redelivered } = message.fields;
+    const { messageId, type } = message.properties;
+    const routingKeyLabel = routingKey ? `"${routingKey}"` : 'none';
+    const redeliveredLabel = redelivered ? ', redelivered' : '';
+
+    this.logger.log(
+      `${type} ${messageId} <- queue "${queue}" <- exchange "${exchange}" ` +
+        `(routing key ${routingKeyLabel}${redeliveredLabel})`,
+    );
+
+    const handler = this.handlers.get(type);
 
     if (!handler) {
-      this.logger.warn(`No handler for ${message.fields.routingKey}, discarded`);
+      this.logger.warn(`No handler for ${type}, discarded`);
       channel.nack(message, false, false);
       return;
     }
 
     try {
-      const event: ConsumedEvent = {
-        id: message.properties.messageId,
-        type: message.fields.routingKey,
+      const consumedMessage: ConsumedMessage = {
+        id: messageId,
+        type,
+        exchange,
+        queue,
+        routingKey,
+        headers: message.properties.headers ?? {},
         occurredAt: fromUnixSeconds(message.properties.timestamp),
-        redelivered: message.fields.redelivered,
+        redelivered,
         payload: JSON.parse(message.content.toString()),
       };
 
-      await handler(event);
+      await handler(consumedMessage);
 
       channel.ack(message);
     } catch (error) {
       this.logger.error(
-        `Event ${message.properties.messageId} failed, discarded: ${(error as Error).message}`,
+        `Message ${messageId} failed, discarded: ${(error as Error).message}`,
       );
       channel.nack(message, false, false);
     }

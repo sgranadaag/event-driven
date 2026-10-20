@@ -1,0 +1,370 @@
+{
+  "info": {
+    "_postman_id": "8f3c2a71-5d4e-4b9a-9c61-2e7f0a1b3d55",
+    "name": "Event-driven RabbitMQ",
+    "description": "One request per case of the four RabbitMQ exchange types. Run the stack first (docker compose up -d --build) and follow the consumers with docker compose logs -f consumer-1 consumer-2. Every response carries routed: false when the exchange delivered the message to no queue, and the messageId the consumer logs.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "orderId",
+      "value": "3f2a9e10-6f1d-4a2b-9c3e-5d7a1b2c4e8f",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Direct (orders.direct)",
+      "description": "Routes on an exact routing key match. Only orders.create is bound, with order.create.",
+      "item": [
+        {
+          "name": "Create order -> orders.create",
+          "request": {
+            "method": "POST",
+            "description": "Routing key order.create. Reaches orders.create and only one of the two consumers handles it. Send it several times to see them alternate. Expected: routed true.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product\": \"keyboard\",\n  \"quantity\": 2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update order -> no queue",
+          "request": {
+            "method": "PUT",
+            "description": "Routing key order.update. No queue is bound with that exact key, so the message is lost. Expected: routed false.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product\": \"keyboard\",\n  \"quantity\": 3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Topic (notifications.topic)",
+      "description": "Routes on a routing key pattern, notification.<channel>.<event>. notifications.email is bound with notification.email.*, notifications.sms with notification.sms.* and #.urgent.",
+      "item": [
+        {
+          "name": "Email welcome -> notifications.email",
+          "request": {
+            "method": "POST",
+            "description": "Routing key notification.email.welcome matches notification.email.*. Expected: routed true, one queue.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"channel\": \"email\",\n  \"event\": \"welcome\",\n  \"message\": \"Welcome aboard\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/notifications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "SMS one-time code -> notifications.sms",
+          "request": {
+            "method": "POST",
+            "description": "Routing key notification.sms.otp matches notification.sms.*. Expected: routed true, one queue.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"channel\": \"sms\",\n  \"event\": \"otp\",\n  \"message\": \"Your code is 4821\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/notifications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Email urgent -> both queues",
+          "request": {
+            "method": "POST",
+            "description": "Routing key notification.email.urgent matches notification.email.* and #.urgent, so it reaches notifications.email and notifications.sms. Expected: routed true, two queues.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"channel\": \"email\",\n  \"event\": \"urgent\",\n  \"message\": \"Server down\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/notifications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Push welcome -> no queue",
+          "request": {
+            "method": "POST",
+            "description": "Routing key notification.push.welcome matches no binding: no queue exists for push. Expected: routed false.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"channel\": \"push\",\n  \"event\": \"welcome\",\n  \"message\": \"Welcome aboard\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/notifications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Fanout (broadcast.fanout)",
+      "description": "Ignores the routing key and copies the message to every bound queue: all five.",
+      "item": [
+        {
+          "name": "Announcement -> all 5 queues",
+          "request": {
+            "method": "POST",
+            "description": "One message, five copies: orders.create, notifications.email, notifications.sms, orders.match-all and orders.match-any. Expected: routed true.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Maintenance tonight at 22:00\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/announcements",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "announcements"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Headers (orders.headers)",
+      "description": "Routes on the message headers; the routing key is ignored. Both queues match priority: high and region: co. orders.match-all needs both (x-match=all), orders.match-any needs one (x-match=any).",
+      "item": [
+        {
+          "name": "Priority only -> orders.match-any",
+          "request": {
+            "method": "POST",
+            "description": "Headers priority: high. One header matches, which is enough for x-match=any but not for x-match=all. Expected: routed true, orders.match-any only.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product\": \"mouse\",\n  \"quantity\": 1,\n  \"priority\": \"high\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/orders/classify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "classify"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Priority and region -> both queues",
+          "request": {
+            "method": "POST",
+            "description": "Headers priority: high and region: co. Every header matches, so both queues get it. Expected: routed true, two queues.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product\": \"mouse\",\n  \"quantity\": 1,\n  \"priority\": \"high\",\n  \"region\": \"co\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/orders/classify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "classify"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "No matching header -> no queue",
+          "request": {
+            "method": "POST",
+            "description": "Headers priority: low and region: mx. Nothing matches. Expected: routed false.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product\": \"mouse\",\n  \"quantity\": 1,\n  \"priority\": \"low\",\n  \"region\": \"mx\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/orders/classify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "classify"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

@@ -1,13 +1,36 @@
-# The whole stack: RabbitMQ, the producer and two consumers, each project
-# built from its own Dockerfile. Each service can also be started on its own,
-# e.g. `docker compose up -d rabbitmq` and then the apps with `npm run start:dev`.
+# RabbitMQ's four exchange types, end to end.
 #
-# Both consumers run the same image. What makes them two subscribers instead
-# of two workers is the queue: each one declares its own, so each gets its own
-# copy of every event. Give them the same RABBIT_QUEUE and they compete for
-# the events instead.
+#   producer ──► orders.direct       (direct)  ──► orders.create
+#            ──► notifications.topic (topic)   ──► notifications.email, notifications.sms
+#            ──► broadcast.fanout    (fanout)  ──► all 5 queues
+#            ──► orders.headers      (headers) ──► orders.match-all, orders.match-any
+#
+# The producer publishes only to exchanges. Each consumer declares the
+# 4 exchanges, the 5 queues and their bindings (consumer/src/core/rabbit/
+# rabbit.schema.ts). Both consumers run the same image and read the same
+# queues, so they compete: each message in a queue is handled by only one.
+#
+#   docker compose up -d --build
+#   docker compose logs -f consumer-1 consumer-2   # which queue and exchange each message came through
+#   http://localhost:3000/docs                     # the producer's endpoints, one per exchange
+#   http://localhost:15672                         # exchanges, queues and bindings (guest / guest)
+#
+# Each service can also be started on its own, e.g. `docker compose up -d
+# rabbitmq` and then the apps with `npm run start:dev`.
 
 name: event-driven
+
+x-rabbit-environment: &rabbit-environment
+  RABBIT_URL: amqp://guest:guest@rabbitmq:5672
+
+x-consumer: &consumer
+  build: ./consumer
+  image: event-driven-consumer
+  environment:
+    <<: *rabbit-environment
+  depends_on:
+    rabbitmq:
+      condition: service_healthy
 
 services:
   rabbitmq:
@@ -17,7 +40,7 @@ services:
     hostname: rabbitmq
     ports:
       - "5672:5672"   # AMQP, the port every .env expects
-      - "15672:15672" # management UI: http://localhost:15672 (guest / guest)
+      - "15672:15672" # management UI
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
     healthcheck:
@@ -26,34 +49,18 @@ services:
       timeout: 5s
       retries: 20
 
+  # Two instances of the same application. Add a third by copying one of these
+  # two lines: it declares the same queues and joins the competition.
+  consumer-1: *consumer
+  consumer-2: *consumer
+
   producer:
     build: ./producer
     environment:
+      <<: *rabbit-environment
       PORT: 3000
-      RABBIT_URL: amqp://guest:guest@rabbitmq:5672
-      RABBIT_EXCHANGE: orders
     ports:
       - "3000:3000"
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-
-  consumer-1:
-    build: ./consumer
-    environment:
-      RABBIT_URL: amqp://guest:guest@rabbitmq:5672
-      RABBIT_EXCHANGE: orders
-      RABBIT_QUEUE: consumer-1
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-
-  consumer-2:
-    build: ./consumer
-    environment:
-      RABBIT_URL: amqp://guest:guest@rabbitmq:5672
-      RABBIT_EXCHANGE: orders
-      RABBIT_QUEUE: consumer-2
     depends_on:
       rabbitmq:
         condition: service_healthy

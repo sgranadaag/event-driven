@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import type { Order } from '../interfaces/order.interface';
+import type { PublishOrderResult } from '../interfaces/publishOrder.interface';
 import { ORDER_PROPERTY_SWAGGER } from '../order.swagger';
 
 export class OrderResponseDto {
@@ -12,33 +12,33 @@ export class OrderResponseDto {
   @ApiProperty(ORDER_PROPERTY_SWAGGER.QUANTITY)
   readonly quantity: number;
 
-  @ApiProperty(ORDER_PROPERTY_SWAGGER.CREATED_AT)
-  readonly createdAt: string;
+  @ApiProperty(ORDER_PROPERTY_SWAGGER.MESSAGE_ID)
+  readonly messageId: string;
 
-  @ApiProperty(ORDER_PROPERTY_SWAGGER.EVENT_ID)
-  readonly eventId: string;
+  @ApiProperty(ORDER_PROPERTY_SWAGGER.ROUTED)
+  readonly routed: boolean;
 
   private constructor(
     id: string,
     product: string,
     quantity: number,
-    createdAt: string,
-    eventId: string,
+    messageId: string,
+    routed: boolean,
   ) {
     this.id = id;
     this.product = product;
     this.quantity = quantity;
-    this.createdAt = createdAt;
-    this.eventId = eventId;
+    this.messageId = messageId;
+    this.routed = routed;
   }
 
-  static fromOrder(order: Order, eventId: string): OrderResponseDto {
+  static fromResult({ order, messageId, routed }: PublishOrderResult): OrderResponseDto {
     return new OrderResponseDto(
       order.id,
       order.product,
       order.quantity,
-      order.createdAt,
-      eventId,
+      messageId,
+      routed,
     );
   }
 }

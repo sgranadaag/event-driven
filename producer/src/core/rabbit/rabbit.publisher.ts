@@ -16,6 +16,7 @@ import { generateId } from '@utils/crypto.util';
 import { toUnixSeconds } from '@utils/date.util';
 import { JSON_CONTENT_TYPE } from './rabbit.constants';
 import { RABBIT_SCHEMA } from './rabbit.schema';
+import { toLogFields } from '@utils/log.util';
 
 @Injectable()
 export class RabbitPublisher implements OnModuleInit, OnModuleDestroy {
@@ -74,12 +75,12 @@ export class RabbitPublisher implements OnModuleInit, OnModuleDestroy {
     });
 
     const wasReturned = this.returnedMessageIds.delete(messageId);
-    const description = `${type} to "${exchange}" (routing key "${routingKey}", message ${messageId})`;
+    const fields = toLogFields({ type, exchange, key: routingKey || undefined });
 
     if (wasReturned) {
-      this.logger.warn(`Not routed to any queue, lost: ${description}`);
+      this.logger.warn(`Not routed to any queue, lost ${fields}`);
     } else {
-      this.logger.log(`Published ${description}`);
+      this.logger.log(`Published ${fields}`);
     }
 
     return { messageId, routed: !wasReturned };

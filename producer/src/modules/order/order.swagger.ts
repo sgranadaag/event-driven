@@ -1,4 +1,5 @@
 import type { ApiPropertyOptions } from '@nestjs/swagger';
+import { ORDER_PRIORITIES } from './order.constants';
 
 export const ORDER_SWAGGER = {
   API_TAG: 'Orders',
@@ -9,8 +10,9 @@ export const ORDER_SWAGGER = {
       description:
         'Publishes `order.create` to the `orders.direct` exchange. A direct ' +
         'exchange routes on an exact routing key match, so the message reaches ' +
-        '`orders.create`, the only queue bound with that key. Both consumers ' +
-        'read that queue, so only one of them handles each order.',
+        '`orders.create`, the only queue bound with that key. The orders ' +
+        'consumer instances share that queue, so only one of them handles ' +
+        'each order.',
     },
     responses: {
       201: { description: 'Published and confirmed by RabbitMQ.' },
@@ -20,11 +22,11 @@ export const ORDER_SWAGGER = {
 
   UPDATE: {
     operation: {
-      summary: 'Request an order update (direct exchange, unrouted)',
+      summary: 'Request an order update (direct exchange)',
       description:
-        'Publishes `order.update` to the same `orders.direct` exchange. No ' +
-        'queue is bound with that exact key, so the message reaches no queue ' +
-        'and is lost: the response answers `routed: false`.',
+        'Publishes `order.update` to the same `orders.direct` exchange. Only ' +
+        '`orders.update` is bound with that exact key, so updates have their ' +
+        'own queue and never delay the creation of new orders.',
     },
     params: [{ name: 'id', description: 'The order id, a UUID.' }],
     responses: {
@@ -33,18 +35,21 @@ export const ORDER_SWAGGER = {
     },
   },
 
-  CLASSIFY: {
+  PRIORITIZE: {
     operation: {
-      summary: 'Publish an order routed by its attributes (headers exchange)',
+      summary: 'Set the priority of an order (headers exchange)',
       description:
-        'Publishes the order to the `orders.headers` exchange with `priority` ' +
-        'and `region` as message headers. The routing key is empty: a headers ' +
-        'exchange ignores it. `orders.match-all` needs both `priority: high` ' +
-        'and `region: co`, `orders.match-any` needs only one of them.',
+        'Publishes `order.prioritize` to the `orders.headers` exchange with ' +
+        '`priority` and `region` as message headers. The routing key is empty: ' +
+        'a headers exchange ignores it. `orders.express` needs both ' +
+        '`priority: high` and `region: co` (`x-match=all`), `orders.priority` ' +
+        'needs only one of them (`x-match=any`). An order that matches neither ' +
+        'needs no special handling, and the response answers `routed: false`.',
     },
+    params: [{ name: 'id', description: 'The order id, a UUID.' }],
     responses: {
-      201: { description: 'Published; `routed` says whether any queue got it.' },
-      400: { description: 'The body does not describe a valid order.' },
+      200: { description: 'Published; `routed` says whether any queue got it.' },
+      400: { description: 'The id is not a UUID or the body is not valid.' },
     },
   },
 } as const;
@@ -64,19 +69,18 @@ export const ORDER_PROPERTY_SWAGGER = {
   },
   PRIORITY: {
     description:
-      'Sent as the `priority` header. Both header queues match on `high`.',
+      'Sent as the `priority` header. Both priority queues match on `high`.',
+    enum: [...ORDER_PRIORITIES],
     example: 'high',
-    required: false,
   },
   REGION: {
-    description: 'Sent as the `region` header. Both header queues match on `co`.',
+    description:
+      'The two-letter country code where the order is delivered, sent as the ' +
+      '`region` header. Both priority queues match on `co` (Colombia).',
     example: 'co',
-    required: false,
   },
   MESSAGE_ID: {
-    description:
-      'The AMQP `messageId` of the published message. The consumer that ' +
-      'handles it logs the same id.',
+    description: 'The AMQP `messageId` of the published message.',
     example: 'c13d07eb-78b4-4e24-9f3a-c18cccc63c0f',
   },
   ROUTED: {

@@ -4,14 +4,15 @@ import { RabbitPublisher } from '@core/rabbit/rabbit.publisher';
 import { RABBIT_SCHEMA } from '@core/rabbit/rabbit.schema';
 import { generateId } from '@utils/crypto.util';
 import {
-  ORDER_CLASSIFIED_MESSAGE,
   ORDER_CREATE_MESSAGE,
+  ORDER_PRIORITIZE_MESSAGE,
   ORDER_UPDATE_MESSAGE,
 } from './order.constants';
-import type { Order } from './interfaces/order.interface';
+import type { Order, OrderPriority } from './interfaces/order.interface';
 import type {
-  ClassifyOrderInput,
   OrderInput,
+  PrioritizeOrderInput,
+  PublishOrderPriorityResult,
   PublishOrderResult,
 } from './interfaces/publishOrder.interface';
 
@@ -48,24 +49,20 @@ export class OrderService {
     return { order, messageId, routed };
   }
 
-  async classify({
-    product,
-    quantity,
-    priority,
-    region,
-  }: ClassifyOrderInput): Promise<PublishOrderResult> {
-    const order: Order = { id: generateId(), product, quantity };
-    const priorityHeader: Record<string, string> = priority ? { priority } : {};
-    const regionHeader: Record<string, string> = region ? { region } : {};
+  async prioritize(
+    id: string,
+    { priority, region }: PrioritizeOrderInput,
+  ): Promise<PublishOrderPriorityResult> {
+    const orderPriority: OrderPriority = { id, priority, region };
 
     const { messageId, routed } = await this.rabbitPublisher.publish({
       exchange: RABBIT_SCHEMA.exchanges.orderAttributes.name,
       routingKey: EMPTY_ROUTING_KEY,
-      type: ORDER_CLASSIFIED_MESSAGE,
-      payload: order,
-      headers: { ...priorityHeader, ...regionHeader },
+      type: ORDER_PRIORITIZE_MESSAGE,
+      payload: orderPriority,
+      headers: { priority, region },
     });
 
-    return { order, messageId, routed };
+    return { orderPriority, messageId, routed };
   }
 }

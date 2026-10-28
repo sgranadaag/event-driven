@@ -10,9 +10,10 @@ import { ApiTags } from '@nestjs/swagger';
 import { SwaggerDocs } from '@decorators/swaggerDocs.decorator';
 import { OrderService } from './order.service';
 import { ORDER_SWAGGER } from './order.swagger';
-import { ClassifyOrderDto } from './dto/classifyOrder.dto';
 import { CreateOrderDto } from './dto/createOrder.dto';
+import { OrderPriorityResponseDto } from './dto/orderPriorityResponse.dto';
 import { OrderResponseDto } from './dto/orderResponse.dto';
+import { PrioritizeOrderDto } from './dto/prioritizeOrder.dto';
 import { UpdateOrderDto } from './dto/updateOrder.dto';
 
 @ApiTags(ORDER_SWAGGER.API_TAG)
@@ -45,16 +46,17 @@ export class OrderController {
     return OrderResponseDto.fromResult(result);
   }
 
-  @SwaggerDocs(ORDER_SWAGGER.CLASSIFY, OrderResponseDto)
-  @Post('classify')
-  async classify(@Body() dto: ClassifyOrderDto): Promise<OrderResponseDto> {
-    const result = await this.orderService.classify({
-      product: dto.product,
-      quantity: dto.quantity,
+  @SwaggerDocs(ORDER_SWAGGER.PRIORITIZE, OrderPriorityResponseDto)
+  @Put(':id/priority')
+  async prioritize(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: PrioritizeOrderDto,
+  ): Promise<OrderPriorityResponseDto> {
+    const result = await this.orderService.prioritize(id, {
       priority: dto.priority,
       region: dto.region,
     });
 
-    return OrderResponseDto.fromResult(result);
+    return OrderPriorityResponseDto.fromResult(result);
   }
 }

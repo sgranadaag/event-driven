@@ -1,69 +1,114 @@
-# RabbitMQ's four exchange types, end to end.
+# RabbitMQ's four exchange types, end to end: one producer, and one specialized
+# consumer per kind of message.
 #
-#   producer ──► orders.direct       (direct)  ──► orders.create
-#            ──► notifications.topic (topic)   ──► notifications.email, notifications.sms
-#            ──► broadcast.fanout    (fanout)  ──► all 5 queues
-#            ──► orders.headers      (headers) ──► orders.match-all, orders.match-any
+#   producer ──► orders.direct       (direct)  ──► orders.create, orders.update     ──► consumer-orders
+#            ──► orders.headers      (headers) ──► orders.express, orders.priority  ──► consumer-orders
+#            ──► notifications.topic (topic)   ──► notifications.email              ──► consumer-notifications-email
+#                                              ──► notifications.sms                ──► consumer-notifications-sms
+#            ──► broadcast.fanout    (fanout)  ──► all 6 queues, so every consumer gets the announcement
 #
-# The producer publishes only to exchanges. Each consumer declares the
-# 4 exchanges, the 5 queues and their bindings (consumer/src/core/rabbit/
-# rabbit.schema.ts). Both consumers run the same image and read the same
-# queues, so they compete: each message in a queue is handled by only one.
+# Containers:
+#   rabbitmq-broker                the broker
+#   producer-api                   publishes to the 4 exchanges, over HTTP on port 3000
+#   consumer-orders                declares and consumes the 4 order queues
+#   consumer-notifications-email   declares and consumes notifications.email only
+#   consumer-notifications-sms     declares and consumes notifications.sms only
 #
+# Run it:
 #   docker compose up -d --build
-#   docker compose logs -f consumer-1 consumer-2   # which queue and exchange each message came through
-#   http://localhost:3000/docs                     # the producer's endpoints, one per exchange
-#   http://localhost:15672                         # exchanges, queues and bindings (guest / guest)
-#
-# Each service can also be started on its own, e.g. `docker compose up -d
-# rabbitmq` and then the apps with `npm run start:dev`.
+#   docker compose logs -f consumer-orders consumer-notifications-email consumer-notifications-sms
+#   http://localhost:3000/docs     # the producer's endpoints
+#   http://localhost:15672         # RabbitMQ management UI (guest / guest)
 
 name: event-driven
 
-x-rabbit-environment: &rabbit-environment
-  RABBIT_URL: amqp://guest:guest@rabbitmq:5672
-
-x-consumer: &consumer
-  build: ./consumer
-  image: event-driven-consumer
-  environment:
-    <<: *rabbit-environment
-  depends_on:
-    rabbitmq:
-      condition: service_healthy
-
 services:
+  # The broker. It starts empty: each consumer declares the exchanges, queues
+  # and bindings it needs when it connects (src/core/rabbit/rabbit.schema.ts).
   rabbitmq:
     image: rabbitmq:4-management
+    container_name: rabbitmq-broker
     # RabbitMQ names its data after the node, and the node after the host, so
     # a fixed hostname keeps the same queues and messages across restarts.
     hostname: rabbitmq
     ports:
-      - "5672:5672"   # AMQP, the port every .env expects
+      - "5672:5672"   # AMQP: where the producer and the consumers connect
       - "15672:15672" # management UI
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - event-driven
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 5s
       timeout: 5s
       retries: 20
 
-  # Two instances of the same application. Add a third by copying one of these
-  # two lines: it declares the same queues and joins the competition.
-  consumer-1: *consumer
-  consumer-2: *consumer
-
+  # Publishes every message to an exchange, never to a queue. Its HTTP
+  # responses say whether each message reached at least one queue (`routed`).
   producer:
     build: ./producer
+    container_name: producer-api
     environment:
-      <<: *rabbit-environment
       PORT: 3000
+      RABBIT_URL: amqp://guest:guest@rabbitmq:5672
     ports:
       - "3000:3000"
+    networks:
+      - event-driven
     depends_on:
       rabbitmq:
         condition: service_healthy
 
+  # Orders. Declares orders.direct, orders.headers and broadcast.fanout, the
+  # queues orders.create, orders.update, orders.express and orders.priority,
+  # and their bindings, then consumes the four queues.
+  consumer-orders:
+    build: ./consumer-orders
+    container_name: consumer-orders
+    environment:
+      RABBIT_URL: amqp://guest:guest@rabbitmq:5672
+    networks:
+      - event-driven
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  # Email notifications. NOTIFICATION_CHANNEL decides which queue this instance
+  # declares and consumes: notifications.email, bound with notification.email.*
+  consumer-notifications-email:
+    build: ./consumer-notifications
+    container_name: consumer-notifications-email
+    environment:
+      RABBIT_URL: amqp://guest:guest@rabbitmq:5672
+      NOTIFICATION_CHANNEL: email
+    networks:
+      - event-driven
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  # SMS notifications: the same application with NOTIFICATION_CHANNEL=sms, so
+  # it declares and consumes notifications.sms, bound with notification.sms.*
+  # and #.urgent. An urgent email reaches this service as well as the email one.
+  consumer-notifications-sms:
+    build: ./consumer-notifications
+    container_name: consumer-notifications-sms
+    environment:
+      RABBIT_URL: amqp://guest:guest@rabbitmq:5672
+      NOTIFICATION_CHANNEL: sms
+    networks:
+      - event-driven
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+networks:
+  # The containers reach each other by service name on this network, which is
+  # why RABBIT_URL points at `rabbitmq` instead of `localhost`.
+  event-driven:
+
 volumes:
+  # RabbitMQ's data: the declared exchanges, queues and bindings, and any
+  # persistent message still waiting in a queue.
   rabbitmq-data:

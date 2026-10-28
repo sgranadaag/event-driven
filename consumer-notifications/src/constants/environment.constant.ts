@@ -1,0 +1,4 @@
+export const ENV = {
+  RABBIT_URL: 'RABBIT_URL',
+  NOTIFICATION_CHANNEL: 'NOTIFICATION_CHANNEL',
+} as const;

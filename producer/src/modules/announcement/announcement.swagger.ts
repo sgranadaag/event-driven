@@ -9,7 +9,7 @@ export const ANNOUNCEMENT_SWAGGER = {
       description:
         'Publishes to the `broadcast.fanout` exchange. A fanout exchange ignores ' +
         'the routing key and copies the message to every queue bound to it: ' +
-        'all five queues, so one request produces five copies.',
+        'all six queues, so one request produces six copies.',
     },
     responses: {
       201: { description: 'Published; `routed` says whether any queue got it.' },

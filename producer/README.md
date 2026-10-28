@@ -17,10 +17,10 @@ src/
   decorators/        composed decorators: SwaggerDocs
   interfaces/        interfaces shared across folders
   modules/           the domain
-    order/           direct (create, update) and headers (classify)
+    order/           direct (create, update) and headers (priority)
     notification/    topic
     announcement/    fanout
-  utils/             pure helpers, one file per kind: crypto, date
+  utils/             pure helpers, one file per kind: crypto, date, log
 ```
 
 `core/rabbit/` knows RabbitMQ and nothing about orders. Each domain module chooses the exchange, the routing key or headers and the payload, and calls `RabbitPublisher.publish(...)`.
@@ -30,13 +30,13 @@ src/
 | Endpoint | Exchange | What it publishes |
 | --- | --- | --- |
 | `POST /orders` | `orders.direct` | `order.create`. Reaches `orders.create` |
-| `PUT /orders/:id` | `orders.direct` | `order.update`. No queue is bound with that key, so it's lost |
-| `POST /orders/classify` | `orders.headers` | The order with `priority` and `region` as headers |
+| `PUT /orders/:id` | `orders.direct` | `order.update`. Reaches `orders.update` |
+| `PUT /orders/:id/priority` | `orders.headers` | `order.prioritize`, with `priority` and `region` as headers. Reaches `orders.express`, `orders.priority`, both or none |
 | `POST /notifications` | `notifications.topic` | Routing key `notification.<channel>.<event>` |
 | `POST /announcements` | `broadcast.fanout` | One message, copied to every queue |
 | `GET /docs` | | Swagger UI |
 
-Every response carries the `messageId` the consumer logs, and `routed`: whether the exchange delivered the message to at least one queue.
+Every response carries the `messageId` and `routed`: whether the exchange delivered the message to at least one queue.
 
 ## Run it
 

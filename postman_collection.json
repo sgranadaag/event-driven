@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "8f3c2a71-5d4e-4b9a-9c61-2e7f0a1b3d55",
     "name": "Event-driven RabbitMQ",
-    "description": "One request per case of the four RabbitMQ exchange types. Run the stack first (docker compose up -d --build) and follow the consumers with docker compose logs -f consumer-1 consumer-2. Every response carries routed: false when the exchange delivered the message to no queue, and the messageId the consumer logs.",
+    "description": "One request per case of the four RabbitMQ exchange types. Run the stack first (docker compose up -d --build) and follow the consumers with docker compose logs -f consumer-orders consumer-notifications-email consumer-notifications-sms. Every response carries routed: false when the exchange delivered the message to no queue.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -19,14 +19,14 @@
   ],
   "item": [
     {
-      "name": "Direct (orders.direct)",
+      "name": "Orders: direct (orders.direct)",
       "description": "Routes on an exact routing key match. Only orders.create is bound, with order.create.",
       "item": [
         {
           "name": "Create order -> orders.create",
           "request": {
             "method": "POST",
-            "description": "Routing key order.create. Reaches orders.create and only one of the two consumers handles it. Send it several times to see them alternate. Expected: routed true.",
+            "description": "Routing key order.create. Reaches orders.create, which consumer-orders reads. With a second consumer-orders instance running, each order goes to only one of them. Expected: routed true.",
             "header": [
               {
                 "key": "Content-Type",
@@ -55,10 +55,10 @@
           "response": []
         },
         {
-          "name": "Update order -> no queue",
+          "name": "Update order -> orders.update",
           "request": {
             "method": "PUT",
-            "description": "Routing key order.update. No queue is bound with that exact key, so the message is lost. Expected: routed false.",
+            "description": "Routing key order.update. Only orders.update is bound with that exact key. Expected: routed true, orders.update.",
             "header": [
               {
                 "key": "Content-Type",
@@ -90,14 +90,156 @@
       ]
     },
     {
-      "name": "Topic (notifications.topic)",
+      "name": "Priority orders: headers (orders.headers)",
+      "description": "Sets the priority and region of an existing order. Routes on the message headers; the routing key is ignored. Both queues match priority: high and region: co. orders.express needs both (x-match=all), orders.priority needs one (x-match=any).",
+      "item": [
+        {
+          "name": "High priority, Colombia -> both queues",
+          "request": {
+            "method": "PUT",
+            "description": "Headers priority: high and region: co. Every header matches, so the order goes to the express line and is also moved ahead. Expected: routed true, orders.express and orders.priority.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"priority\": \"high\",\n  \"region\": \"co\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}/priority",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}",
+                "priority"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "High priority, Mexico -> orders.priority",
+          "request": {
+            "method": "PUT",
+            "description": "Headers priority: high and region: mx. One header matches: enough for x-match=any, not for x-match=all. Expected: routed true, orders.priority only.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"priority\": \"high\",\n  \"region\": \"mx\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}/priority",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}",
+                "priority"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Low priority, Colombia -> orders.priority",
+          "request": {
+            "method": "PUT",
+            "description": "Headers priority: low and region: co. One header matches: enough for x-match=any, not for x-match=all. Expected: routed true, orders.priority only.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"priority\": \"low\",\n  \"region\": \"co\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}/priority",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}",
+                "priority"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Low priority, Mexico -> no queue",
+          "request": {
+            "method": "PUT",
+            "description": "Headers priority: low and region: mx. Nothing matches, so the order needs no special handling. Expected: routed false.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"priority\": \"low\",\n  \"region\": \"mx\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}/priority",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}",
+                "priority"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Notifications: topic (notifications.topic)",
       "description": "Routes on a routing key pattern, notification.<channel>.<event>. notifications.email is bound with notification.email.*, notifications.sms with notification.sms.* and #.urgent.",
       "item": [
         {
           "name": "Email welcome -> notifications.email",
           "request": {
             "method": "POST",
-            "description": "Routing key notification.email.welcome matches notification.email.*. Expected: routed true, one queue.",
+            "description": "Routing key notification.email.welcome matches notification.email.*. Handled by consumer-notifications-email. Expected: routed true, one queue.",
             "header": [
               {
                 "key": "Content-Type",
@@ -129,7 +271,7 @@
           "name": "SMS one-time code -> notifications.sms",
           "request": {
             "method": "POST",
-            "description": "Routing key notification.sms.otp matches notification.sms.*. Expected: routed true, one queue.",
+            "description": "Routing key notification.sms.otp matches notification.sms.*. Handled by consumer-notifications-sms. Expected: routed true, one queue.",
             "header": [
               {
                 "key": "Content-Type",
@@ -161,7 +303,7 @@
           "name": "Email urgent -> both queues",
           "request": {
             "method": "POST",
-            "description": "Routing key notification.email.urgent matches notification.email.* and #.urgent, so it reaches notifications.email and notifications.sms. Expected: routed true, two queues.",
+            "description": "Routing key notification.email.urgent matches notification.email.* and #.urgent, so it reaches notifications.email and notifications.sms: consumer-notifications-email and consumer-notifications-sms each get a copy. Expected: routed true, two queues.",
             "header": [
               {
                 "key": "Content-Type",
@@ -224,14 +366,14 @@
       ]
     },
     {
-      "name": "Fanout (broadcast.fanout)",
-      "description": "Ignores the routing key and copies the message to every bound queue: all five.",
+      "name": "Maintenance announcements: fanout (broadcast.fanout)",
+      "description": "Ignores the routing key and copies the message to every bound queue: all six.",
       "item": [
         {
-          "name": "Announcement -> all 5 queues",
+          "name": "Announcement -> all 6 queues",
           "request": {
             "method": "POST",
-            "description": "One message, five copies: orders.create, notifications.email, notifications.sms, orders.match-all and orders.match-any. Expected: routed true.",
+            "description": "One message, six copies: orders.create, orders.update, orders.express and orders.priority (consumer-orders), notifications.email (consumer-notifications-email) and notifications.sms (consumer-notifications-sms). Expected: routed true.",
             "header": [
               {
                 "key": "Content-Type",
@@ -254,111 +396,6 @@
               ],
               "path": [
                 "announcements"
-              ]
-            }
-          },
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "Headers (orders.headers)",
-      "description": "Routes on the message headers; the routing key is ignored. Both queues match priority: high and region: co. orders.match-all needs both (x-match=all), orders.match-any needs one (x-match=any).",
-      "item": [
-        {
-          "name": "Priority only -> orders.match-any",
-          "request": {
-            "method": "POST",
-            "description": "Headers priority: high. One header matches, which is enough for x-match=any but not for x-match=all. Expected: routed true, orders.match-any only.",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"product\": \"mouse\",\n  \"quantity\": 1,\n  \"priority\": \"high\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{baseUrl}}/orders/classify",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "orders",
-                "classify"
-              ]
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "Priority and region -> both queues",
-          "request": {
-            "method": "POST",
-            "description": "Headers priority: high and region: co. Every header matches, so both queues get it. Expected: routed true, two queues.",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"product\": \"mouse\",\n  \"quantity\": 1,\n  \"priority\": \"high\",\n  \"region\": \"co\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{baseUrl}}/orders/classify",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "orders",
-                "classify"
-              ]
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "No matching header -> no queue",
-          "request": {
-            "method": "POST",
-            "description": "Headers priority: low and region: mx. Nothing matches. Expected: routed false.",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"product\": \"mouse\",\n  \"quantity\": 1,\n  \"priority\": \"low\",\n  \"region\": \"mx\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{baseUrl}}/orders/classify",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "orders",
-                "classify"
               ]
             }
           },

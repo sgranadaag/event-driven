@@ -8,8 +8,8 @@ export function setupSwagger(app: INestApplication): void {
     .setTitle('Event-driven producer')
     .setDescription(
       'Publishes messages to RabbitMQ through its four exchange types: direct ' +
-        '(orders), topic (notifications), fanout (announcements) and headers ' +
-        '(classified orders). It always publishes to an exchange, never to a ' +
+        '(orders), headers (order priority), topic (notifications) and fanout ' +
+        '(announcements). It always publishes to an exchange, never to a ' +
         'queue, and every response says whether the exchange routed the ' +
         'message to at least one queue.',
     )

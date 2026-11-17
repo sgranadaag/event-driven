@@ -1,0 +1,150 @@
+# Kafka end to end: one producer, three topics and one consumer service per
+# topic, each in its own consumer group.
+#
+#   producer ──► interactions    3 partitions, picked by the producer: 0 views, 1 clicks, 2 scrolls ──► consumer-interactions
+#            ──► db-queries      3 partitions, picked by the key: the table                         ──► consumer-queries
+#            ──► service-health  3 partitions, picked by the key: the service                       ──► consumer-health
+#
+# Containers:
+#   kafka-broker       the broker, in KRaft mode: it is its own controller, no ZooKeeper
+#   kafka-ui           a web UI to inspect topics, partitions, offsets and consumer groups
+#   producer-api       writes to the 3 topics, over HTTP on port 3000
+#   consumer-*         one per topic: declares it if missing, and consumes it
+#
+# Run it:
+#   docker compose up -d --build
+#   docker compose logs -f consumer-interactions consumer-queries consumer-health
+#   http://localhost:3000/docs     # the producer's endpoints
+#   http://localhost:8080          # Kafka UI
+#
+# Split a topic between the instances of one group (one partition each):
+#   docker compose up -d --scale consumer-interactions=3
+
+name: event-driven
+
+services:
+  # The broker. It starts with no topics and never creates one on its own
+  # (KAFKA_AUTO_CREATE_TOPICS_ENABLE): the producer and each consumer declare
+  # the topics they use when they connect (src/core/kafka/kafka.schema.ts).
+  kafka:
+    image: apache/kafka:4.4.0
+    container_name: kafka-broker
+    hostname: kafka
+    environment:
+      # A single node that is both the broker and the KRaft controller.
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      # Fixed, so the volume below keeps belonging to the same cluster.
+      CLUSTER_ID: NowPFSOlTQuHTS5o24EvMw
+      # Three listeners: INTERNAL for the containers (kafka:9092), EXTERNAL
+      # for a service started on the host (localhost:9094), and CONTROLLER
+      # for the KRaft quorum. A client connects to any of them and is then
+      # told to use the advertised address of its listener.
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      # Kafka's internal topics (committed offsets, transactions) default to
+      # 3 replicas, more than one broker can hold.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      # Form a group as soon as its first member joins, instead of waiting 3s.
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    ports:
+      - "9094:9094" # EXTERNAL: where a service started on the host connects
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - event-driven
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-broker-api-versions.sh", "--bootstrap-server", "localhost:9092"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+
+  # Browse the topics and their messages, partition by partition, and see each
+  # consumer group's committed offsets and lag.
+  kafka-ui:
+    image: kafbat/kafka-ui:v1.5.0
+    container_name: kafka-ui
+    environment:
+      KAFKA_CLUSTERS_0_NAME: event-driven
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    ports:
+      - "8080:8080"
+    networks:
+      - event-driven
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  # Writes every event to a topic. Its HTTP responses say which partition
+  # each event went to and at which offset.
+  # producer:
+  #   build: ./producer
+  #   container_name: producer-api
+  #   environment:
+  #     PORT: 3000
+  #     KAFKA_BROKERS: kafka:9092
+  #   ports:
+  #     - "3000:3000"
+  #   networks:
+  #     - event-driven
+  #   depends_on:
+  #     kafka:
+  #       condition: service_healthy
+
+  # # Interactions. No container_name, so it can be scaled: every instance joins
+  # # the interactions-consumer group, and the group splits the 3 partitions of
+  # # `interactions` between them. A 4th instance would get none and wait.
+  # consumer-interactions:
+  #   build: ./consumer-interactions
+  #   environment:
+  #     KAFKA_BROKERS: kafka:9092
+  #     KAFKA_GROUP_ID: interactions-consumer
+  #   networks:
+  #     - event-driven
+  #   depends_on:
+  #     kafka:
+  #       condition: service_healthy
+
+  # # Database queries: reads `db-queries` in the queries-consumer group.
+  # consumer-queries:
+  #   build: ./consumer-queries
+  #   container_name: consumer-queries
+  #   environment:
+  #     KAFKA_BROKERS: kafka:9092
+  #     KAFKA_GROUP_ID: queries-consumer
+  #   networks:
+  #     - event-driven
+  #   depends_on:
+  #     kafka:
+  #       condition: service_healthy
+
+  # # Service health: reads `service-health` in the health-consumer group.
+  # consumer-health:
+  #   build: ./consumer-health
+  #   container_name: consumer-health
+  #   environment:
+  #     KAFKA_BROKERS: kafka:9092
+  #     KAFKA_GROUP_ID: health-consumer
+  #   networks:
+  #     - event-driven
+  #   depends_on:
+  #     kafka:
+  #       condition: service_healthy
+
+networks:
+  # The containers reach each other by service name on this network, which is
+  # why KAFKA_BROKERS points at `kafka` instead of `localhost`.
+  event-driven:
+
+volumes:
+  # Kafka's data: the topics, every message they still keep, and the offsets
+  # each consumer group has committed.
+  kafka-data:

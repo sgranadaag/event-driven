@@ -1,0 +1,599 @@
+{
+  "info": {
+    "_postman_id": "4b7e9d12-3a6c-4f85-b1e0-9c2d7a5f8e31",
+    "name": "Event-driven Kafka",
+    "description": "One request per kind of event, across the three Kafka topics. Run the stack first (docker compose up -d --build) and follow the consumers with docker compose logs -f consumer-interactions consumer-queries consumer-health. Every response says which partition the event was written to and at which offset; the consumer logs the same partition and offset when it reads it. The partitions chosen by key below are the ones murmur2 gives with 3 partitions.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Interactions: partition chosen by the producer (interactions)",
+      "description": "The producer writes each kind of interaction to its own partition: 0 views, 1 clicks, 2 scrolls. The key, the user, does not choose it. Each partition has its own sequence of offsets. Scale the consumer (docker compose up -d --scale consumer-interactions=3) and each instance reads one kind.",
+      "item": [
+        {
+          "name": "View -> partition 0",
+          "request": {
+            "method": "POST",
+            "description": "Writes interaction.view. Expected: partition 0, and the next offset of that partition.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"user-42\",\n  \"page\": \"/products/keyboard\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/interactions/views",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "interactions",
+                "views"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Click -> partition 1",
+          "request": {
+            "method": "POST",
+            "description": "Writes interaction.click. The same user as the view, but another partition: here the kind decides. Expected: partition 1.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"user-42\",\n  \"page\": \"/products/keyboard\",\n  \"element\": \"add-to-cart\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/interactions/clicks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "interactions",
+                "clicks"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Scroll -> partition 2",
+          "request": {
+            "method": "POST",
+            "description": "Writes interaction.scroll. Expected: partition 2.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"user-42\",\n  \"page\": \"/products/keyboard\",\n  \"depth\": 75\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/interactions/scrolls",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "interactions",
+                "scrolls"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Scroll past 100% -> rejected",
+          "request": {
+            "method": "POST",
+            "description": "The depth is a percentage. Nothing is written. Expected: 400.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"user-42\",\n  \"page\": \"/products/keyboard\",\n  \"depth\": 150\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/interactions/scrolls",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "interactions",
+                "scrolls"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Database queries: partition chosen by the key (db-queries)",
+      "description": "The key is the table, and Kafka hashes it to choose the partition, so every query on a table lands in the same partition and is read in the order it was sent. Queries on other tables can land in other partitions, read in parallel. Each message stores the query itself, so it can be run again from the message alone: {\"id\", \"type\": \"insert\" | \"select\" | \"delete\", \"table\", \"payload\"}. The payload is {values} for an insert, {columns, where} for a select and {where} for a delete. The response echoes the type.",
+      "item": [
+        {
+          "name": "Insert into users -> partition 2",
+          "request": {
+            "method": "POST",
+            "description": "Writes query.insert with key users. Stored as {\"id\": \"3f2a9e10-6f1d-4a2b-9c3e-5d7a1b2c4e8f\", \"type\": \"insert\", \"table\": \"users\", \"payload\": {\"values\": {\"name\": \"Ana\", \"email\": \"ana@example.com\"}}}. Expected: type insert, partition 2.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"table\": \"users\",\n  \"values\": {\n    \"name\": \"Ana\",\n    \"email\": \"ana@example.com\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/queries/insert",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "queries",
+                "insert"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "insert on users",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"table\": \"users\",\n  \"values\": {\n    \"name\": \"Ana\",\n    \"email\": \"ana@example.com\"\n  }\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/queries/insert",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "queries",
+                    "insert"
+                  ]
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"id\": \"3f2a9e10-6f1d-4a2b-9c3e-5d7a1b2c4e8f\",\n  \"type\": \"insert\",\n  \"table\": \"users\",\n  \"partition\": 2,\n  \"offset\": \"0\",\n  \"messageId\": \"c13d07eb-78b4-4e24-9f3a-c18cccc63c0f\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Select from users -> partition 2",
+          "request": {
+            "method": "POST",
+            "description": "Writes query.select with key users: the partition of the insert, one offset later, so the consumer reads it after the insert. Stored as {\"id\": \"8c855bde-e568-4e3c-8560-7a2448c0d155\", \"type\": \"select\", \"table\": \"users\", \"payload\": {\"columns\": [\"name\", \"email\"], \"where\": {\"email\": \"ana@example.com\"}}}. Expected: type select, partition 2.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"table\": \"users\",\n  \"columns\": [\n    \"name\",\n    \"email\"\n  ],\n  \"where\": {\n    \"email\": \"ana@example.com\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/queries/select",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "queries",
+                "select"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "select on users",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"table\": \"users\",\n  \"columns\": [\n    \"name\",\n    \"email\"\n  ],\n  \"where\": {\n    \"email\": \"ana@example.com\"\n  }\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/queries/select",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "queries",
+                    "select"
+                  ]
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"id\": \"8c855bde-e568-4e3c-8560-7a2448c0d155\",\n  \"type\": \"select\",\n  \"table\": \"users\",\n  \"partition\": 2,\n  \"offset\": \"1\",\n  \"messageId\": \"c13d07eb-78b4-4e24-9f3a-c18cccc63c0f\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Delete from users -> partition 2",
+          "request": {
+            "method": "POST",
+            "description": "Writes query.delete with key users, still after the insert and the select. Stored as {\"id\": \"f4a1dea6-d5e1-4299-af41-5f8ef8247130\", \"type\": \"delete\", \"table\": \"users\", \"payload\": {\"where\": {\"email\": \"ana@example.com\"}}}. Expected: type delete, partition 2.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"table\": \"users\",\n  \"where\": {\n    \"email\": \"ana@example.com\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/queries/delete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "queries",
+                "delete"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "delete on users",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"table\": \"users\",\n  \"where\": {\n    \"email\": \"ana@example.com\"\n  }\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/queries/delete",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "queries",
+                    "delete"
+                  ]
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"id\": \"f4a1dea6-d5e1-4299-af41-5f8ef8247130\",\n  \"type\": \"delete\",\n  \"table\": \"users\",\n  \"partition\": 2,\n  \"offset\": \"2\",\n  \"messageId\": \"c13d07eb-78b4-4e24-9f3a-c18cccc63c0f\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Insert into order_items -> partition 1",
+          "request": {
+            "method": "POST",
+            "description": "Another table, another key, so possibly another partition: no order is kept between users and order_items. Stored as {\"id\": \"fbf2d2d8-fa90-4a4d-8bea-ab01d7479f88\", \"type\": \"insert\", \"table\": \"order_items\", \"payload\": {\"values\": {\"product\": \"keyboard\", \"quantity\": 2}}}. Expected: type insert, partition 1.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"table\": \"order_items\",\n  \"values\": {\n    \"product\": \"keyboard\",\n    \"quantity\": 2\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/queries/insert",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "queries",
+                "insert"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "insert on order_items",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"table\": \"order_items\",\n  \"values\": {\n    \"product\": \"keyboard\",\n    \"quantity\": 2\n  }\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/queries/insert",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "queries",
+                    "insert"
+                  ]
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"id\": \"fbf2d2d8-fa90-4a4d-8bea-ab01d7479f88\",\n  \"type\": \"insert\",\n  \"table\": \"order_items\",\n  \"partition\": 1,\n  \"offset\": \"0\",\n  \"messageId\": \"c13d07eb-78b4-4e24-9f3a-c18cccc63c0f\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Delete without where -> rejected",
+          "request": {
+            "method": "POST",
+            "description": "A delete must say which rows it removes. Nothing is written. Expected: 400.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"table\": \"users\",\n  \"where\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/queries/delete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "queries",
+                "delete"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Service health: partition chosen by the key (service-health)",
+      "description": "The key is the service, so every event of a service lands in the same partition and is read in the order it happened. The topic keeps its events for 30 days: run a consumer with a new KAFKA_GROUP_ID and it reads them all again.",
+      "item": [
+        {
+          "name": "Outage of payments-api -> partition 2",
+          "request": {
+            "method": "POST",
+            "description": "Writes health.outage with key payments-api. consumer-health logs it as an error. Expected: partition 2.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"service\": \"payments-api\",\n  \"reason\": \"Database connection pool exhausted\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/health/outages",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "outages"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Threshold of payments-api -> partition 2",
+          "request": {
+            "method": "POST",
+            "description": "Writes health.threshold with key payments-api, so it is read after the outage. consumer-health logs it as a warning, with exceededBy=13.5. Expected: partition 2.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"service\": \"payments-api\",\n  \"metric\": \"cpu\",\n  \"value\": 93.5,\n  \"threshold\": 80\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/health/thresholds",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "thresholds"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Cost of search-api -> partition 1",
+          "request": {
+            "method": "POST",
+            "description": "Writes health.cost with key search-api, another service and another partition. Expected: partition 1.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"service\": \"search-api\",\n  \"amount\": 125.4,\n  \"currency\": \"USD\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/health/costs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "costs"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

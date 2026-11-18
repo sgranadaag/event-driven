@@ -180,3 +180,94 @@ This is the base that event-driven systems are built on. From here, each one def
 Despite these challenges, this architecture is very useful, above all to **connect distributed systems**. For example, in **microservices** we can manage the communication between services with an implementation like this one, and it's also very useful for the communication between the stages of a **data pipeline**.
 
 The key is understanding when it's a good moment to use it, knowing the complications it can bring. Some technologies offer features, like **transactions**, that solve part of these challenges, but they don't remove the responsibility of designing the system to handle them.
+
+---
+## Publish/subscribe
+
+To talk about event-driven architecture, it's also important to talk about **publish/subscribe** (*pub/sub*), because this pattern shows how many systems communicate with each other. It's closely related to the criteria defined by [implicit invocation](#theory-implicit-invocation), but it presents a way to achieve that invocation over **remote components**.
+
+This pattern arose from the growing demand on systems. As technology evolved and people brought it into their daily lives, that demand pushed us to find new ways to handle the amount of data and users that systems were expected to serve. As [Eugster et al.](https://classpages.cselabs.umn.edu/Spring-2018/csci8980/Papers/PublishSubscribe/many-faces.pdf) put it, the Internet turned distributed systems into *thousands of entities spread all over the world*, and point-to-point, synchronous communication made those applications rigid and hard to evolve.
+
+So we needed a way to exchange information between different kinds of systems while keeping them **loosely coupled**, so that each one can be scaled and maintained independently, without affecting the others.
+
+### Entities
+
+- **Publisher:** the part of the system in charge of notifying others about a change. It publishes events about the changes that may matter to the interested parts of the system, <ins>without directing them to any specific receiver</ins>: it doesn't know who will receive them, or how many ([Kafka: The Definitive Guide](https://assets.confluent.io/m/1b509accf21490f0/original/20170707-EB-Confluent_Kafka_Definitive-Guide_Complete.pdf), chapter 1).
+- **Subscriber:** the component that, at some point, expresses its interest in being notified about a change in another system.
+- **Event service:** basically, the medium through which all the data flows. It receives different names in the literature: *event notification service* or *software bus* in [Eugster et al.](https://classpages.cselabs.umn.edu/Spring-2018/csci8980/Papers/PublishSubscribe/many-faces.pdf), *information bus*, and **broker** in messaging systems like Kafka. Besides moving the events, it stores the subscriptions and delivers each event to the interested subscribers.
+- **Event (or message):** the object that moves through the different parts of the process. It starts with the publisher, which creates it following the requirements of the system and of the subscribers, and it ends once a subscriber has processed it.
+
+These entities interact through a small set of operations ([Eugster et al.](https://classpages.cselabs.umn.edu/Spring-2018/csci8980/Papers/PublishSubscribe/many-faces.pdf), section 2):
+
+| Operation | Called by | What it does |
+| --- | --- | --- |
+| `subscribe()` / `unsubscribe()` | Subscriber | Registers, or cancels, its interest in a kind of event |
+| `publish()` | Publisher | Hands a new event to the event service |
+| `advertise()` | Publisher | Optional: announces what kind of events it will publish |
+| *notify* | Event service | Delivers the event to every interested subscriber |
+
+### Workflow
+
+There are many ways to implement this pattern, and they differ in how subscribers express which events they want ([Eugster et al.](https://classpages.cselabs.umn.edu/Spring-2018/csci8980/Papers/PublishSubscribe/many-faces.pdf), section 4).
+
+> Message passing, RPC, notifications, shared spaces and message queuing, which the same paper describes in section 3, aren't implementations of pub/sub: they're **alternative communication paradigms**, and the authors compare them with pub/sub precisely to show that none of them fully decouples the participants.
+
+We'll stick to the basic flow:
+
+1. **Define the data:** first, understand what kind of data actually matters to the system.
+2. **Subscribe:** the subscribers express their interest in being notified about a specific change.
+3. **Publish:** the publisher emits an event.
+4. **Route and store:** the event service is the only part of the flow that knows the connected entities. It has the logic to route each message from its starting point to the rest of the components, and it can also store the events until they're delivered.
+5. **Notify:** the subscribers are notified about the change and process the event.
+
+At this point we can imagine a kind of **client/server** architecture: the event service is the server, and the publishers and subscribers play the role of clients.
+
+```mermaid
+sequenceDiagram
+    participant P as Publisher
+    participant ES as Event service
+    participant S as Subscriber
+    S->>ES: subscribe(topic)
+    P->>ES: publish(event)
+    ES->>ES: match with subscriptions, store
+    ES-->>S: deliver(event)
+    S->>ES: acknowledge
+```
+
+> **Important:** the subscriber isn't always really *notified*. In some models, it's the subscriber that asks the server for new updates. Kafka is a good example: its consumers **pull** messages from the broker at the rate they can sustain, so they're never flooded, and they can rewind and read old messages again ([Kreps et al., 2011](https://people.csail.mit.edu/matei/courses/2015/6.S897/readings/kafka.pdf)).
+
+The **publisher** is also responsible for creating the event, in a predefined format that the subscriber will understand once it reads it. Depending on the implementation, the event can carry **headers**, a **key** and a specific **schema** definition. JSON and XML are common because they're easy to use and human-readable, but they lack strict typing and compatibility between schema versions; that's why many Kafka developers favor **Apache Avro** ([Kafka: The Definitive Guide](https://assets.confluent.io/m/1b509accf21490f0/original/20170707-EB-Confluent_Kafka_Definitive-Guide_Complete.pdf), chapter 1).
+
+The **subscriber**, on the other hand, is responsible for processing the event. It can do anything with it, and it should let the event service know once it has finished. How it does so depends on the system: RabbitMQ takes an acknowledgement per message, while in Kafka the consumer commits the **offset** it has reached, which means it has processed every message before it ([Kreps et al., 2011](https://people.csail.mit.edu/matei/courses/2015/6.S897/readings/kafka.pdf)).
+
+### Architecture
+
+As I mentioned before, the architecture is basically a **client/server** model with three main parts: two clients, the publisher and the subscriber, and one server, the event service.
+
+```mermaid
+flowchart LR
+    P1[Publisher: web app] --> ES((Event service))
+    P2[Publisher: IoT device] --> ES
+    ES --> S1[Subscriber: analytics]
+    ES --> S2[Subscriber: alerts]
+    ES --> S3[Subscriber: billing]
+```
+
+This **centralized** design is the most common one, but not the only one ([Eugster et al.](https://classpages.cselabs.umn.edu/Spring-2018/csci8980/Papers/PublishSubscribe/many-faces.pdf), section 5.2.1). In a **distributed** architecture there is no central server, and in an **intermediate** one the event service runs as a network of servers. Kafka follows the latter, with a **cluster of brokers**.
+
+This architecture comes with several advantages that are visible at first glance:
+
+- **Loose coupling:** every client is only connected to the event service, and each connection is independent, so each client has its own lifecycle and can scale horizontally as required. That lets clients be added and removed freely. [Eugster et al.](https://classpages.cselabs.umn.edu/Spring-2018/csci8980/Papers/PublishSubscribe/many-faces.pdf) break this decoupling down into three dimensions:
+
+  | Dimension | Publishers and subscribers… |
+  | --- | --- |
+  | **Space** | don't need to know each other, nor how many of them there are |
+  | **Time** | don't need to be connected at the same time: an event published while a subscriber is offline still reaches it later |
+  | **Synchronization** | aren't blocked: publishing doesn't wait for anyone, and subscribers are notified asynchronously |
+
+- **Interoperability:** a publisher can be any kind of system: a frontend application, a mobile app, another server or an IoT device.
+- **Reliability:** most event services store the events in some way. Together with the acknowledgement policies, that lets events be delivered reliably: if a subscriber fails, the event isn't lost, it waits until the subscriber comes back.
+
+One point against it is that **everything has to go through the server**, which turns it into a **single point of failure**. So how can we prevent a crash from losing all our data? The answer is to distribute the server and keep **replicas** of the data. In Kafka, each partition can be replicated across several brokers of the cluster: one broker is the partition's leader, and if it fails, another broker that holds a replica takes over ([Kafka: The Definitive Guide](https://assets.confluent.io/m/1b509accf21490f0/original/20170707-EB-Confluent_Kafka_Definitive-Guide_Complete.pdf), chapter 1). The number of replicas is set per topic, so the most critical data can have more copies.
+
+> Replication wasn't in Kafka from the start: the [original paper](https://people.csail.mit.edu/matei/courses/2015/6.S897/readings/kafka.pdf) stores each partition on a single broker and lists built-in replication as future work.
